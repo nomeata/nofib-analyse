@@ -100,9 +100,22 @@ data PerModuleTableSpec =
         forall a . Result a =>
            SpecM
                 String                  -- Name of the table
+                String                  -- Short name (for column heading)
                 String                  -- HTML tag for the table (currently unused)
                 (Results -> Map String a)       -- get the module map
                 (a -> Bool)             -- Result within reasonable limits?
+
+aggregateModuleTable :: PerModuleTableSpec -> PerProgTableSpec
+aggregateModuleTable (SpecM long_name short_name html_tag get_results is_ok)
+ = SpecP long_name short_name html_tag (mapToMaybe . get_results) (const Success) is_ok
+  where
+    mapToMaybe m = if Map.null m then Nothing else Just (sumResult (Map.elems m))
+
+progTableHasName :: PerProgTableSpec -> String -> Bool
+progTableHasName (SpecP ln sn _ _ _ _) n = n == ln || n == sn
+
+modTableHasName :: PerModuleTableSpec -> String -> Bool
+modTableHasName (SpecM ln sn _ _ _) n = n == ln || n == sn
 
 -- The various per-program aspects of execution that we can generate results for.
 size_spec, alloc_spec, runtime_spec, elapsedtime_spec, muttime_spec, mutetime_spec,
@@ -160,8 +173,9 @@ all_specs = [
 namedColumns :: [String] -> IO [PerProgTableSpec]
 namedColumns ss = mapM findSpec ss
   where findSpec s =
-           case [ spec | spec@(SpecP _ short_name _ _ _ _) <- all_specs,
-                         short_name == s ] of
+           case filter (`progTableHasName` s) all_specs ++
+                map aggregateModuleTable (filter (`modTableHasName` s) per_module_result_tab)
+           of
                 [] -> die ("unknown column: " ++ s)
                 (spec:_) -> return spec
 
@@ -226,9 +240,9 @@ pickSummary rs
 
 per_module_result_tab :: [PerModuleTableSpec]
 per_module_result_tab =
-        [ SpecM "Module Sizes" "mod-sizes" module_size always_ok
-        , SpecM "Compile Times" "compile-time" compile_time time_ok
-        , SpecM "Compile Allocations" "compile-allocations" compile_allocs always_ok
+        [ SpecM "Module Sizes" "Mod Size" "mod-sizes" module_size always_ok
+        , SpecM "Compile Times" "Comp. Time" "compile-time" compile_time time_ok
+        , SpecM "Compile Allocations" "Comp. Alloc" "compile-allocations" compile_allocs always_ok
         ]
 
 always_ok :: a -> Bool
@@ -241,19 +255,21 @@ time_ok :: Float -> Bool
 time_ok t = t > tooquick_threshold
 
 -----------------------------------------------------------------------------
--- LaTeX table generation (just the summary for now)
+-- LaTeX table generation
 
 latexOutput :: [ResultTable] -> Maybe String -> [String] -> [PerProgTableSpec]
             -> Maybe [String] -> Normalise -> Bool -> String
 
 latexOutput results (Just table_name) _ _ _ norm inc_baseline
-  = let
-        table_spec = [ spec | spec@(SpecP _ n _ _ _ _) <- per_prog_result_tab, 
-                       n == table_name ]
-    in
-    case table_spec of
+  = case
+        [ latexProgTable results spec norm inc_baseline "\n"
+        | spec <- per_prog_result_tab, spec `progTableHasName` table_name]
+        ++
+        [ latexModTable results spec norm inc_baseline "\n"
+        | spec <- per_module_result_tab, spec `modTableHasName` table_name]
+    of
         [] -> error ("can't find table named: " ++ table_name)
-        (spec:_) -> latexProgTable results spec norm inc_baseline "\n"
+        (r:_) -> r
 
 latexOutput results Nothing column_headings summary_spec summary_rows _ _ =
    (if (length results >= 2)
@@ -297,11 +313,48 @@ latex_show_results (r:rs) f stat _result_ok norm inc_baseline
         (_lows,gms,_highs) = unzip3 (map calc_gmsd results_per_run)
         (mins, maxs)       = unzip  (map calc_minmax results_per_run)
 
-normalise :: Result a => Normalise -> a -> a -> BoxValue 
+normalise :: Result a => Normalise -> a -> a -> BoxValue
 normalise norm = case norm of
              NormalisePercent -> convert_to_percentage
              NormaliseRatio   -> normalise_to_base
              NormaliseNone    -> \_base res -> toBox res
+
+latexModTable :: [ResultTable] -> PerModuleTableSpec -> Normalise -> Bool -> ShowS
+latexModTable results (SpecM _ _ _ get_results result_ok) norm inc_baseline
+  = latex_show_multi_results results get_results result_ok norm inc_baseline
+
+latex_show_multi_results
+   :: Result a
+        => [ResultTable]
+        -> (Results -> Map String a)
+        -> (a -> Bool)
+        -> Normalise
+        -> Bool
+        -> ShowS
+
+latex_show_multi_results []      _ _    _ _
+ = error "latex_show_multi_results: Can't happen?"
+latex_show_multi_results (r:rs) f _result_ok norm inc_baseline
+        = makeLatexTable $
+             [ TableRow (BoxString (prog ++ "." ++ mod) : boxes)
+             | (prog,mod,boxes) <- results_per_prog_and_mod ] ++
+             if nodevs then [] else
+             [ TableLine,
+               TableRow (BoxString "Min" : mins),
+               TableRow (BoxString "Max" : maxs),
+               TableRow (BoxString "Geometric Mean" : gms) ]
+ where
+        -- results_per_prog_and_mod :: [ (String,String,[BoxValue a]) ]
+        results_per_prog_and_mod =
+            [ (prog, mod, if inc_baseline then xs else tail xs)
+            | (prog, results) <- Map.toList r
+            , (mod, result) <- Map.toList (f results)
+            , let fms = map (maybe Map.empty f . Map.lookup prog) rs
+            , let (_, xs) = calc_result fms Just (const Success) (const True) (normalise norm) (mod, result)
+            ]
+        results_per_run    = transpose [ r | (_,_,r) <- results_per_prog_and_mod ]
+        (_lows,gms,_highs) = unzip3 (map calc_gmsd results_per_run)
+        (mins, maxs)       = unzip  (map calc_minmax results_per_run)
 
 -----------------------------------------------------------------------------
 -- ASCII page generation
@@ -328,7 +381,7 @@ asciiGenProgTable results args norm (SpecP long_name _ _ get_result get_status r
   . ascii_show_results results args get_result get_status result_ok norm
 
 asciiGenModTable :: [ResultTable] -> [String] -> PerModuleTableSpec -> ShowS
-asciiGenModTable results args (SpecM long_name _ get_result result_ok)
+asciiGenModTable results args (SpecM long_name _ _ get_result result_ok)
   = str long_name
   . str "\n"
   . ascii_show_multi_results results args get_result result_ok
@@ -501,13 +554,15 @@ show_per_prog_results_width w (prog,results)
 
 csvTable :: [ResultTable] -> String -> Normalise -> Bool -> String
 csvTable results table_name norm stddev
-  = let
-        table_spec = [ spec | spec@(SpecP _ n _ _ _ _) <- per_prog_result_tab, 
-                       n == table_name ]
-    in
-    case table_spec of
+  = case
+        [ csvProgTable results spec norm stddev "\n"
+        | spec <- per_prog_result_tab, spec `progTableHasName` table_name]
+        ++
+        [ csvModTable results spec norm stddev "\n"
+        | spec <- per_module_result_tab, spec `modTableHasName` table_name]
+    of
         [] -> error ("can't find table named: " ++ table_name)
-        (spec:_) -> csvProgTable results spec norm stddev "\n"
+        (r:_) -> r
 
 csvProgTable :: [ResultTable] -> PerProgTableSpec -> Normalise -> Bool -> ShowS
 csvProgTable results (SpecP _long_name _ _ get_result get_status result_ok)
@@ -536,6 +591,38 @@ csv_show_results (r:rs) f stat _result_ok norm stddev
         result_line (prog,boxes)
           | stddev    = interleave "," (str prog : concat (map stddevbox boxes))
           | otherwise = interleave "," (str prog : map (str.showBox) boxes)
+
+        stddevbox (BoxStdDev b s) = [str (showBox b), str (printf "%.3f" s)]
+        stddevbox b = [str (showBox b), str "0"]
+
+csvModTable :: [ResultTable] -> PerModuleTableSpec -> Normalise -> Bool -> ShowS
+csvModTable results (SpecM _ _ _ get_result result_ok)
+             norm stddev
+  = csv_show_multi_results results get_result result_ok norm stddev
+
+csv_show_multi_results
+   :: Result a
+        => [ResultTable]
+        -> (Results -> Map String a)
+        -> (a -> Bool)
+        -> Normalise
+        -> Bool
+        -> ShowS
+
+csv_show_multi_results []      _ _    _ _
+ = error "csv_show_multi_results: Can't happen?"
+csv_show_multi_results (r:rs) f _result_ok norm stddev
+        = interleave "\n"
+            [ result_line prog mod boxes
+            | (prog, results) <- Map.toList r
+            , (mod, result) <- Map.toList (f results)
+            , let fms = map (maybe Map.empty f . Map.lookup prog) rs
+            , let (_, boxes) = calc_result fms Just (const Success) (const True) (normalise norm) (mod, result)
+            ]
+ where
+        result_line prog mod boxes
+          | stddev    = interleave "," $ str prog : str mod : concat (map stddevbox boxes)
+          | otherwise = interleave "," $ str prog : str mod : map (str.showBox) boxes
 
         stddevbox (BoxStdDev b s) = [str (showBox b), str (printf "%.3f" s)]
         stddevbox b = [str (showBox b), str "0"]
@@ -660,6 +747,7 @@ class Result a where
    toBox    :: a -> BoxValue
    float    :: a -> Float
    variance :: a -> Float
+   sumResult :: [a] -> a
 
 -- We assume an Int is a size, and print it in kilobytes.
 
@@ -667,6 +755,7 @@ instance Result Int where
     toBox  = BoxInt
     float a = fromIntegral a
     variance a = 0
+    sumResult = sum
 
 data MeanStdDev a = MeanStdDev a Float
 
@@ -674,16 +763,24 @@ instance Result a => Result (MeanStdDev a) where
     toBox    (MeanStdDev a b) = BoxStdDev (toBox a) b
     float    (MeanStdDev a _) = float a
     variance (MeanStdDev _ b) = b
+    -- This summing of standard deviations is only valid if the
+    -- random variables are indepenent. If we assume that variance in measurements
+    -- is random noise, then this should be ok
+    sumResult mss = MeanStdDev
+        (sumResult [m | MeanStdDev m _ <- mss])
+        (sqrt $ sum [s^2 | MeanStdDev _ s <- mss])
 
 instance Result Integer where
     toBox = BoxInteger
     float a = fromIntegral a
     variance a = 0
+    sumResult = sum
 
 instance Result Float where
     toBox = BoxFloat
     float a = realToFrac a
     variance a = 0
+    sumResult = sum
 
 -- -----------------------------------------------------------------------------
 -- BoxValues
