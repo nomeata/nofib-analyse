@@ -1,15 +1,15 @@
-name:                nofib-analyze
+name:                nofib-analyse
 version:             7.12.0.20151208
 synopsis:            Parse and compare nofib runs
 description:
   The nofib benchmark suite is the standard benchmark suite
-  to measure Haskell compilers. The nofib-analyze program can parse
+  to measure Haskell compilers. The nofib-analyse program can parse
   the logs of nofib runs, and compare their output, producing tables in text,
   LaTeX or HTML format.
   .
-  nofib-analyze is readily available in your GHC source tree in
+  nofib-analyse is readily available in your GHC source tree in
   @nofib/nofib-analyse@, so usually, you will not need this packages. It might
-  however be handy when you need to analyze log files without having a checked-out
+  however be handy when you need to analyse log files without having a checked-out
   copy of GHC around.
 homepage:            https://ghc.haskell.org/trac/ghc/wiki/Building/RunningNoFib
 license:             BSD3
@@ -21,7 +21,7 @@ category:            Development
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable nofib-analyze
+executable nofib-analyse
   main-is:             Main.hs
   other-modules:       CmdLine, GenUtils, Slurp
   build-depends:
@@ -33,4 +33,4 @@ executable nofib-analyze
 
 source-repository head
   type:     git
-  location: https://github.com/nomeata/nofib-analyze
+  location: https://github.com/nomeata/nofib-analyse
