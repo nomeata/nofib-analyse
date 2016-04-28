@@ -1,5 +1,5 @@
 name:                nofib-analyse
-version:             7.12.0.20151208
+version:             8.1.0.20160428
 synopsis:            Parse and compare nofib runs
 description:
   The nofib benchmark suite is the standard benchmark suite
