@@ -1,5 +1,5 @@
 name:                nofib-analyse
-version:             8.1.0.20160428
+version:             8.5.0.20180213
 synopsis:            Parse and compare nofib runs
 description:
   The nofib benchmark suite is the standard benchmark suite
@@ -20,12 +20,14 @@ copyright:           1997 - 2005 Simon Marlow
 category:            Development
 build-type:          Simple
 cabal-version:       >=1.10
+tested-with:         GHC==8.5.*, GHC==8.4.1, GHC==8.2.2, GHC==8.0.2, GHC==7.10.3, GHC==7.8.4, GHC==7.6.3, GHC==7.4.2, GHC==7.2.2, GHC==7.0.4
+
 
 executable nofib-analyse
   main-is:             Main.hs
   other-modules:       CmdLine, GenUtils, Slurp
   build-depends:
-    base >=4.3 && <4.10,
+    base >=4.3 && <4.12,
     regex-compat == 0.95.*,
     array >= 0.3 && < 0.6,
     containers >= 0.4 && < 0.6
